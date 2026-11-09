@@ -9,3 +9,17 @@ services:
     build: ./src/evaluation
     depends_on:
       - bike-api
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployment/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    depends_on:
+      - bike-api
+    restart: always
+
+volumes:
+  prometheus_data:
