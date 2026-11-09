@@ -1,0 +1,11 @@
+groups:
+  - name: bike-api-alerts
+    rules:
+      - alert: BikeApiDown
+        expr: up{job="bike-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The bike sharing API is unreachable."
+          description: "Prometheus could not read /metrics of bike-api for more than 1 minute."
