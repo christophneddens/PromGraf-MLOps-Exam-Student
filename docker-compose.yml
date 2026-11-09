@@ -1,4 +1,10 @@
 services:
+  bike-api:
+    build: ./src/api
+    ports:
+      - "8080:8080"
+    restart: always
+
   evaluation:
     build: ./src/evaluation
     depends_on:
