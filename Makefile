@@ -1,6 +1,6 @@
 # Start all services (more services are added in the next steps)
 all:
-	docker compose up --build -d bike-api
+	docker compose up --build -d bike-api prometheus
 
 # Stop all services
 stop:
