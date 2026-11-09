@@ -5,6 +5,8 @@ on January 2011 and keep January (with predictions) as Evidently reference.
 
 Endpoints:
 - /predict       : predict the number of bikes (cnt) for one hour
+- /evaluate      : predict a period, compare it with January (Evidently),
+                   update the Prometheus gauges
 - /metrics       : all metrics in Prometheus format
 """
 import datetime
@@ -19,11 +21,15 @@ import pandas as pd
 import requests
 from sklearn.ensemble import RandomForestRegressor
 
-from fastapi import FastAPI, Response, Request
+from evidently import Report, Dataset, DataDefinition, Regression
+from evidently.metrics import MAE, MAPE, RMSE, R2Score
+from evidently.presets import DataDriftPreset
+
+from fastapi import FastAPI, HTTPException, Response, Request
 from pydantic import BaseModel, Field
 
 from prometheus_client import (Counter, Histogram, generate_latest,
-                               CollectorRegistry, CONTENT_TYPE_LATEST)
+                               CollectorRegistry, Gauge, CONTENT_TYPE_LATEST)
 
 # Hide library warnings so that the logs stay readable
 warnings.filterwarnings("ignore")
@@ -49,6 +55,23 @@ REQUEST_COUNT = Counter(
 REQUEST_LATENCY = Histogram(
     "api_request_duration_seconds", "API request duration in seconds",
     ["endpoint", "method", "status_code"], registry=registry)
+
+# Model quality on the last evaluated period (set by /evaluate)
+RMSE_GAUGE = Gauge("model_rmse_score", "RMSE of the model on the last evaluated period",
+                   registry=registry)
+MAE_GAUGE = Gauge("model_mae_score", "MAE of the model on the last evaluated period",
+                  registry=registry)
+R2_GAUGE = Gauge("model_r2_score", "R2 score of the model on the last evaluated period",
+                 registry=registry)
+
+# Metric of my choice: 1 = Evidently detects data drift, 0 = no drift.
+# Why it is relevant: RMSE, MAE and R2 need the true number of bikes, which
+# is only known afterwards. Drift in the inputs (weather, hour, day ...)
+# is an early warning: the model receives data unlike January, the data it
+# was trained on, so its predictions may become unreliable.
+DRIFT_GAUGE = Gauge("evidently_data_drift_detected_status",
+                    "1 if Evidently detects data drift in the last evaluated period, else 0",
+                    registry=registry)
 
 
 # --- Global Variables for Model and Data ---
@@ -148,6 +171,50 @@ async def monitor_requests(request: Request, call_next):
     return response
 
 
+# --- Evaluation logic (used by /evaluate) ---
+def _make_dataset(df: pd.DataFrame) -> Dataset:
+    """Tells Evidently which column is what."""
+    definition = DataDefinition(
+        numerical_columns=NUM_FEATS + [TARGET, PREDICTION],
+        categorical_columns=CAT_FEATS,
+        regression=[Regression(target=TARGET, prediction=PREDICTION)],
+    )
+    columns = FEATURES + [TARGET, PREDICTION]   # dteday is not needed
+    return Dataset.from_pandas(df[columns], data_definition=definition)
+
+
+def _evaluate(current: pd.DataFrame, period_name: str) -> EvaluationReportOutput:
+    """Predicts the period, runs the Evidently report, updates the gauges."""
+    current = current.copy()
+    current[PREDICTION] = MODEL.predict(current[FEATURES])
+
+    report = Report(metrics=[RMSE(), MAE(), MAPE(), R2Score(),
+                             DataDriftPreset(columns=FEATURES)])
+    snapshot = report.run(current_data=_make_dataset(current),
+                          reference_data=_make_dataset(REFERENCE_DATA))
+
+    # The results come in the same order as the metrics above
+    results = snapshot.dict()["metrics"]
+    rmse = results[0]["value"]
+    mae = results[1]["value"]["mean"]
+    mape = results[2]["value"]["mean"]
+    r2 = results[3]["value"]
+    drift_share = results[4]["value"]["share"]   # DriftedColumnsCount
+    drift_detected = 1 if drift_share >= 0.5 else 0   # Evidently's default rule
+
+    RMSE_GAUGE.set(rmse)
+    MAE_GAUGE.set(mae)
+    R2_GAUGE.set(r2)
+    DRIFT_GAUGE.set(drift_detected)
+    logger.info(f"{period_name}: RMSE={rmse:.2f} MAE={mae:.2f} R2={r2:.3f} "
+                f"drifted columns={drift_share:.0%}")
+
+    return EvaluationReportOutput(
+        message=f"Evaluation of '{period_name}' done, Prometheus metrics updated.",
+        rmse=rmse, mape=mape, mae=mae, r2score=r2,
+        drift_detected=drift_detected, evaluated_items=len(current))
+
+
 # --- API Endpoints ---
 @app.get("/")
 async def read_root():
@@ -160,6 +227,17 @@ def predict(item: BikeSharingInput):
     features = pd.DataFrame([item.model_dump()])[FEATURES]
     prediction = MODEL.predict(features)[0]
     return PredictionOutput(predicted_count=round(float(prediction), 2))
+
+
+@app.post("/evaluate", response_model=EvaluationReportOutput)
+def evaluate(payload: EvaluationData):
+    """Evaluates the model on a period sent by run_evaluation.py."""
+    current = pd.DataFrame(payload.data)
+    missing = [col for col in FEATURES + [TARGET] if col not in current.columns]
+    if current.empty or missing:
+        raise HTTPException(status_code=400,
+                            detail=f"Empty data or missing columns: {missing}")
+    return _evaluate(current, payload.evaluation_period_name)
 
 
 @app.get("/metrics")
