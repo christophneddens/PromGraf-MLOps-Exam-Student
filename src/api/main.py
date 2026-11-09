@@ -1,14 +1,16 @@
-"""Bike Sharing Predictor API (exam).
+"""Bike Sharing Predictor API with Prometheus monitoring (exam).
 
 At start-up (only once): download the UCI data, train a RandomForestRegressor
 on January 2011 and keep January (with predictions) as Evidently reference.
 
 Endpoints:
 - /predict       : predict the number of bikes (cnt) for one hour
+- /metrics       : all metrics in Prometheus format
 """
 import datetime
 import io
 import logging
+import time
 import warnings
 import zipfile
 from typing import Any, Optional
@@ -17,9 +19,11 @@ import pandas as pd
 import requests
 from sklearn.ensemble import RandomForestRegressor
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, Request
 from pydantic import BaseModel, Field
 
+from prometheus_client import (Counter, Histogram, generate_latest,
+                               CollectorRegistry, CONTENT_TYPE_LATEST)
 
 # Hide library warnings so that the logs stay readable
 warnings.filterwarnings("ignore")
@@ -34,6 +38,17 @@ app = FastAPI(
     description="API for predicting bike sharing demand with MLOps monitoring.",
     version="1.0.0"
 )
+
+# --- Prometheus Metrics Definitions ---
+# Own registry: /metrics shows only our metrics
+registry = CollectorRegistry()
+
+REQUEST_COUNT = Counter(
+    "api_requests_total", "Total number of API requests",
+    ["endpoint", "method", "status_code"], registry=registry)
+REQUEST_LATENCY = Histogram(
+    "api_request_duration_seconds", "API request duration in seconds",
+    ["endpoint", "method", "status_code"], registry=registry)
 
 
 # --- Global Variables for Model and Data ---
@@ -120,6 +135,19 @@ class EvaluationReportOutput(BaseModel):
     evaluated_items: int
 
 
+# --- Request monitoring (every request except /metrics) ---
+@app.middleware("http")
+async def monitor_requests(request: Request, call_next):
+    """Counts each request and measures how long it took."""
+    start = time.time()
+    response = await call_next(request)
+    if request.url.path != "/metrics":
+        labels = [request.url.path, request.method, str(response.status_code)]
+        REQUEST_COUNT.labels(*labels).inc()
+        REQUEST_LATENCY.labels(*labels).observe(time.time() - start)
+    return response
+
+
 # --- API Endpoints ---
 @app.get("/")
 async def read_root():
@@ -132,3 +160,9 @@ def predict(item: BikeSharingInput):
     features = pd.DataFrame([item.model_dump()])[FEATURES]
     prediction = MODEL.predict(features)[0]
     return PredictionOutput(predicted_count=round(float(prediction), 2))
+
+
+@app.get("/metrics")
+def metrics():
+    """All Prometheus metrics of the API (read by Prometheus)."""
+    return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
