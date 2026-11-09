@@ -153,8 +153,8 @@ def generate_traffic(count: int, full_data: pd.DataFrame):
 if __name__ == "__main__":
     _full_data_cache = _process_data(_fetch_data())
 
-          # Evaluate the three February weeks one after the other.
-       # The 20-second pause lets Prometheus (scrape every 15 s) record each result.
-       for period_name, (start_date, end_date) in WEEKLY_PERIODS.items():
-           run_evaluation(_full_data_cache, period_name, start_date, end_date)
-           time.sleep(20)
+    # Evaluate the three February weeks one after the other.
+    # The 20-second pause lets Prometheus (scrape every 15 s) record each result.
+    for period_name, (start_date, end_date) in WEEKLY_PERIODS.items():
+        run_evaluation(_full_data_cache, period_name, start_date, end_date)
+        time.sleep(20)
