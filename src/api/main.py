@@ -1,12 +1,28 @@
-from evidently import Report, Dataset, DataDefinition, Regression
-from evidently.metrics import MAE, RMSE, R2Score
-from evidently.presets import DataDriftPreset
+"""Bike Sharing Predictor API (exam).
 
-from fastapi import FastAPI, HTTPException, Response, Request
+At start-up (only once): download the UCI data, train a RandomForestRegressor
+on January 2011 and keep January (with predictions) as Evidently reference.
+
+Endpoints:
+- /predict       : predict the number of bikes (cnt) for one hour
+"""
+import datetime
+import io
+import logging
+import warnings
+import zipfile
+from typing import Any, Optional
+
+import pandas as pd
+import requests
+from sklearn.ensemble import RandomForestRegressor
+
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from prometheus_client import Counter, Histogram, generate_latest, CollectorRegistry, Gauge
 
+# Hide library warnings so that the logs stay readable
+warnings.filterwarnings("ignore")
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -19,18 +35,56 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- Prometheus Metrics Definitions ---
-
-
 
 # --- Global Variables for Model and Data ---
+DATASET_URL = "https://archive.ics.uci.edu/static/public/275/bike+sharing+dataset.zip"
+DTEDAY_COL_NAME = 'dteday'
 TARGET = 'cnt'
 PREDICTION = 'prediction'
 NUM_FEATS = ['temp', 'atemp', 'hum', 'windspeed', 'mnth', 'hr', 'weekday']
 CAT_FEATS = ['season', 'holiday', 'workingday', 'weathersit']
+FEATURES = NUM_FEATS + CAT_FEATS
 
 
 # --- Data Ingestion and Preparation Functions ---
+# (same as in src/evaluation/run_evaluation.py)
+def _fetch_data() -> pd.DataFrame:
+    """Fetches the bike sharing dataset and returns a DataFrame."""
+    logger.info("Fetching data from UCI archive...")
+    content = requests.get(DATASET_URL, verify=False, timeout=60).content
+    with zipfile.ZipFile(io.BytesIO(content)) as z:
+        df = pd.read_csv(z.open("hour.csv"), header=0, sep=',',
+                         parse_dates=[DTEDAY_COL_NAME])
+    return df
+
+
+def _process_data(raw_data: pd.DataFrame) -> pd.DataFrame:
+    """Sets a DatetimeIndex (date + hour) and sorts the rows by time."""
+    raw_data['hr'] = raw_data['hr'].astype(int)
+    raw_data.index = raw_data.apply(
+        lambda row: datetime.datetime.combine(row[DTEDAY_COL_NAME].date(),
+                                              datetime.time(row.hr)),
+        axis=1
+    )
+    return raw_data.sort_index()
+
+
+def _train_and_predict_reference_model(data: pd.DataFrame):
+    """Trains the model on January 2011.
+
+    Returns the model and the January data with a 'prediction' column,
+    which Evidently uses as reference.
+    """
+    reference = data.loc['2011-01-01 00:00:00':'2011-01-31 23:00:00'].copy()
+    model = RandomForestRegressor(n_estimators=50, random_state=42)
+    model.fit(reference[FEATURES], reference[TARGET])
+    reference[PREDICTION] = model.predict(reference[FEATURES])
+    logger.info(f"Model trained on {len(reference)} rows of January 2011.")
+    return model, reference
+
+
+# The model is trained only once, when the API container starts
+MODEL, REFERENCE_DATA = _train_and_predict_reference_model(_process_data(_fetch_data()))
 
 
 # --- Pydantic Models for API Input/Output ---
@@ -65,8 +119,16 @@ class EvaluationReportOutput(BaseModel):
     drift_detected: int
     evaluated_items: int
 
+
 # --- API Endpoints ---
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the Bike Sharing Predictor API. Use /predict to get bike counts or /evaluate to run drift reports."}
 
+
+@app.post("/predict", response_model=PredictionOutput)
+def predict(item: BikeSharingInput):
+    """Predicts the number of bikes for one hour."""
+    features = pd.DataFrame([item.model_dump()])[FEATURES]
+    prediction = MODEL.predict(features)[0]
+    return PredictionOutput(predicted_count=round(float(prediction), 2))
