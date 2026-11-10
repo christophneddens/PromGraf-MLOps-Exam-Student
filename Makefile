@@ -1,6 +1,6 @@
 # Start all services (more services are added in the next steps)
 all:
-	docker compose up --build -d bike-api prometheus node-exporter
+	docker compose up --build -d bike-api prometheus node-exporter grafana
 
 # Stop all services
 stop:
