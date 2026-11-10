@@ -1,0 +1,96 @@
+{
+  "uid": "api-performance",
+  "title": "API Performance",
+  "tags": ["bike-api", "exam"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate by endpoint (requests/s)",
+      "description": "How many requests per second each endpoint receives.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum by (endpoint) (rate(api_requests_total[1m]))", "legendFormat": "{{endpoint}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error rate (share of requests that are not 2xx)",
+      "description": "Errors (4xx, 5xx) divided by all requests. Empty when there is no traffic.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(api_requests_total{status_code!~\"2..\"}[1m])) or vector(0)) / sum(rate(api_requests_total[1m]))",
+          "legendFormat": "error rate"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latency P95 by endpoint (seconds)",
+      "description": "95 % of requests are faster than this.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (endpoint, le) (rate(api_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Average latency (seconds)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(api_request_duration_seconds_sum[1m])) / sum(rate(api_request_duration_seconds_count[1m]))",
+          "legendFormat": "average"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Total requests since API start",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 16},
+      "targets": [{"refId": "A", "expr": "sum(api_requests_total)"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    }
+  ]
+}
