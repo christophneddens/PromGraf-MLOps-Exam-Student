@@ -42,6 +42,7 @@ services:
     volumes:
       - ./deployment/grafana/provisioning/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
       - ./deployment/grafana/provisioning/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./deployment/grafana/provisioning/alerting.yaml:/etc/grafana/provisioning/alerting/alerting.yaml
       - ./deployment/grafana/dashboards:/etc/grafana/dashboards
       - grafana_data:/var/lib/grafana
     depends_on:
