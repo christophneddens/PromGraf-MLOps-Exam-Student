@@ -1,11 +1,11 @@
-#bike Sharing — monitoring with Prometheus and Grafana (exam)
+# Bike Sharing — Monitoring with Prometheus & Grafana (exam)
 
 A FastAPI service predicts the number of rented bikes per hour (`cnt`, UCI Bike Sharing dataset).
 Prometheus collects metrics about the API, the model and the host; Grafana shows them on three
 dashboards and raises alerts. Everything — data source, dashboards and the Grafana alert — is
 created from files at start-up, so the project runs on any machine with one command: `make`.
 
-##Quick start
+## Quick start
 
 ```bash
 make              # same as "make all": builds and starts bike-api, Prometheus, Grafana, node-exporter
@@ -25,7 +25,7 @@ waits for this automatically.
 | Grafana | http://localhost:3000 | login `admin` / `admin`; Dashboards and Alerting → Alert rules |
 | node-exporter | http://localhost:9100/metrics | metrics of the host |
 
-##project structure
+## Project structure
 
 ```
 ├── Makefile                         all, stop, evaluation, traffic, fire-alert
@@ -46,7 +46,7 @@ waits for this automatically.
         └── dashboards/              API-dashboard.json, Model-dashboard.json, Infra-dashboard.json
 ```
 
-##how it works
+## How it works
 
 1. **Model.** When the `bike-api` container starts, `_fetch_data` and `_process_data` load the UCI
    data and `_train_and_predict_reference_model` trains a `RandomForestRegressor` (50 trees,
@@ -73,7 +73,7 @@ afterwards. Drift in the inputs (weather, hour, day …) is visible at once. It 
 that the model receives data unlike the data it was trained on, so its predictions may become
 unreliable — and a signal to check the data and consider retraining.
 
-##dashboards
+## Dashboards
 
 | Dashboard | Panels |
 |---|---|
@@ -81,7 +81,7 @@ unreliable — and a signal to check the data and consider retraining.
 | Model Performance & Drift | RMSE, MAE, R² and drift status (last value and over time) |
 | Infrastructure Overview | CPU used, memory used, disk used (root filesystem), network traffic |
 
-##alerts
+## Alerts
 
 | Alert | Defined in | Condition | How to test |
 |---|---|---|---|
@@ -97,7 +97,7 @@ The alert turns *Pending* and, after 30 s, *Firing* (Grafana → Alerting → Al
 (The contact point is Grafana's default e-mail contact point; no mail server is configured, so the
 alert is shown in Grafana but no e-mail is sent.)
 
-##results of `make evaluation`
+## Results of `make evaluation`
 
 | Period (as defined in `run_evaluation.py`) | Rows | RMSE | MAE | R² | Drifted columns |
 |---|---|---|---|---|---|
@@ -112,7 +112,7 @@ is always 2 instead of 1. Because the reference is one month only, calendar colu
 a longer reference period (or leaving `mnth` out of the drift check) would make the drift status
 more selective.
 
-##notes and choices
+## Notes and choices
 
 - `docker compose` (Compose v2) is used; the starter Makefile called the old `docker-compose`.
 - `make all` starts the four services only. The `evaluation` container is started by
