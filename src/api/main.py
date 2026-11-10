@@ -7,6 +7,7 @@ Endpoints:
 - /predict       : predict the number of bikes (cnt) for one hour
 - /evaluate      : predict a period, compare it with January (Evidently),
                    update the Prometheus gauges
+- /trigger-drift : evaluate a deliberately distorted batch (used by make fire-alert)
 - /metrics       : all metrics in Prometheus format
 """
 import datetime
@@ -171,7 +172,7 @@ async def monitor_requests(request: Request, call_next):
     return response
 
 
-# --- Evaluation logic (used by /evaluate) ---
+# --- Evaluation logic (used by /evaluate and /trigger-drift) ---
 def _make_dataset(df: pd.DataFrame) -> Dataset:
     """Tells Evidently which column is what."""
     definition = DataDefinition(
@@ -238,6 +239,23 @@ def evaluate(payload: EvaluationData):
         raise HTTPException(status_code=400,
                             detail=f"Empty data or missing columns: {missing}")
     return _evaluate(current, payload.evaluation_period_name)
+
+
+@app.post("/trigger-drift", response_model=EvaluationReportOutput)
+def trigger_drift():
+    """Simulates a strong drift to test the alert (make fire-alert).
+
+    January data is changed: much warmer, wetter and windier, heavy rain,
+    holidays, and five times more bikes than in reality. The RMSE becomes
+    very high and Evidently detects data drift.
+    """
+    current = REFERENCE_DATA.sample(n=200, random_state=42).drop(columns=[PREDICTION])
+    for col in ['temp', 'atemp', 'hum', 'windspeed']:
+        current[col] = current[col] + 0.5
+    current['weathersit'] = 4
+    current['holiday'] = 1
+    current[TARGET] = current[TARGET] * 5
+    return _evaluate(current, "simulated_drift")
 
 
 @app.get("/metrics")
